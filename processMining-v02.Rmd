@@ -1,0 +1,365 @@
+---
+title: Process Mining
+output: 
+  rmdformats::readthedown:
+    toc_depth: 4
+    number_sections: TRUE
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, comment = FALSE, message = FALSE, warning = FALSE, error = FALSE, fig.width = 9, fig.align = "center")
+
+options(knitr.table.format = "html")
+
+
+library(dplyr)
+library(lubridate)
+library(gt)
+library(ggplot2)
+library(bupaR)
+library(daqapo)
+library(processmapR)
+
+```
+
+```{r readData&Format}
+
+#read data
+data <- read.csv("./IncidentData.csv")
+
+#clean header
+data <- data %>% janitor::clean_names()
+
+#data date format
+data$date_stamp <- ymd_hms(data$date_stamp)
+
+# bupar requirement to create life status column
+
+data$lifecycle <- "Start"
+
+# merge incident value
+data <- data %>% distinct() %>% arrange(date_stamp) 
+
+# activity instance id created
+data$act_instance_id <- 1:nrow(data)
+
+
+```
+
+# Data Summary  
+
+```{r}
+
+start_date <- min(as.Date(data$date_stamp))
+end_date <- max(as.Date(data$date_stamp))
+
+data %>%
+  head(10) %>% 
+  DT::datatable()
+
+```
+
+Number of tickets to analyze **`r length(unique(data$incident_id)) `** with **`r ncol(data)`** attributes And total number of events **`r nrow(data) `**
+
+## State Occurance
+
+> Top 10 State
+
+```{r}
+
+data %>% 
+  count(incident_activity_type) %>% 
+  top_n(10) %>% 
+  ggplot()+
+  geom_bar(aes(x=n,y=reorder(incident_activity_type,n)),stat="identity")+
+  labs(x="Count",
+    y ="Activity type")+
+  theme_classic()
+
+```
+
+> Bottom 10 State
+
+```{r}
+
+data %>% 
+  count(incident_activity_type) %>% 
+  top_n(-10) %>% 
+  ggplot()+
+  geom_bar(aes(x=n,y=reorder(incident_activity_type,-n)),stat="identity") +
+  labs(x="Count",
+    y ="Activity type")+
+  theme_classic()
+
+
+
+```   
+
+## Most No. of Transition
+
+```{r}
+
+data %>% 
+  count(incident_id) %>% 
+  top_n(20) %>% 
+  ggplot()+
+  geom_bar(aes(x=n,y=reorder(incident_id,n)),stat="identity") +
+  labs(x="Count",
+    y ="Incident id")+
+  theme_classic()
+
+```
+
+```{r eventlog}
+
+# change colname for date
+colnames(data)[2] <- "start"
+
+event_log <- eventlog(data,
+                      case_id = "incident_id", 
+                      activity_id = "incident_activity_type",
+                      activity_instance_id = "act_instance_id",
+                      lifecycle_id = "lifecycle",
+                      timestamp = "start",
+                      resource_id = "assignment_group")
+
+```
+
+# Data Quality Check
+
+```{r activityLog}
+
+activity_log <- daqapo::activitylog(activitylog = data,
+                               case_id = "incident_id", 
+                               activity_id = "incident_activity_type",
+                               lifecycle_ids = c("start"),
+                               resource_id = "assignment_group")
+
+```
+
+> Missing Value 
+
+```{r}
+
+activity_log %>% 
+  detect_missing_values()
+
+```
+
+> Duration Outlier
+
+```{r}
+# 
+# activity_log %>% 
+#   detect_inactive_periods(threshold = 30)
+
+```
+
+> Overlaps
+
+```{r}
+# 
+# activity_log %>% 
+#   detect_overlaps()
+
+```
+> Time Anomalies
+
+```{r}
+
+# activity_log %>% 
+#   detect_time_anomalies()
+
+```
+
+# Event Data
+
+## Event Mapping 
+
+```{r}
+
+mapping_fines <- mapping(eventlog = event_log)
+mapping_fines
+
+```
+
+## Event Summary 
+
+```{r}
+
+event_log %>% 
+ summary()
+
+```
+
+## Trace Detail
+
+```{r}
+
+event_log %>% 
+traces %>% 
+  DT::datatable()
+
+
+```
+
+## Trace Map
+
+> Top 20 trace
+
+```{r}
+
+event_log %>% 
+  trace_explorer(n_traces = 10,type = c("frequent"))
+
+```
+
+ > Bottom 20 trace
+
+```{r}
+
+event_log %>% 
+  trace_explorer(type = c("infrequent"),n_traces = 10)  
+
+```
+
+# Process Map
+
+## Frequency Profile
+
+> Relative Frequency
+
+* The relative number of instances per activity
+* The relative outgoing flows for each activity
+
+```{r}
+
+event_log %>% 
+filter_trace(c(1:10)) %>% 
+ process_map(type = frequency("relative"))
+
+```
+
+> Relative Case
+
+* The relative number of cases per activity and flow
+
+```{r}
+
+event_log %>% 
+filter_trace(c(1:10)) %>% 
+ process_map(type = frequency("relative_case"))
+
+```
+
+> Absolute Frequency
+
+* The absolute number of activity instances and flows
+
+```{r}
+
+event_log %>% 
+filter_trace(c(1:10)) %>% 
+ process_map(type = frequency("absolute"))
+
+```
+
+> Absolute Case Frequency 
+
+* The absolute number of cases behind each activity and flow
+
+```{r}
+
+event_log %>% 
+filter_trace(c(1:10)) %>% 
+ process_map(type = frequency("absolute_case"))
+
+```
+
+## Performance Profile
+
+>Mean Profile
+
+
+```{r}
+
+event_log %>% 
+  filter_trace(c(1:10)) %>% 
+   process_map(performance(mean, "hours"))
+
+```
+
+## Combination Profile
+
+```{r}
+
+event_log %>% 
+  filter_trace(c(1:10)) %>% 
+    process_map(type_nodes = frequency("relative_case"),
+                type_edges = performance(mean))
+
+```
+
+# Resource Map
+
+```{r}
+
+
+event_log %>% 
+  filter_trace(c(1:10)) %>% 
+  resource_map()
+
+```
+
+
+# Precedence Matrix
+
+>Absolute frequency
+
+```{r}
+
+
+event_log %>%
+  filter_trace(c(1:10)) %>% 
+    precedence_matrix(type = "absolute") %>%
+    plot
+
+```
+
+>Relative Frequency
+
+```{r}
+event_log %>%
+  filter_trace(c(1:10)) %>% 
+    precedence_matrix(type = "relative") %>%
+    plot
+
+
+
+```
+
+>Antecedent-wise Frequencies
+
+```{r}
+event_log %>%
+  filter_trace(c(1:10)) %>% 
+    precedence_matrix(type = "relative-antecedent") %>%
+    plot
+
+
+
+```
+
+>Consequent-wise Frequencies
+
+```{r}
+
+event_log %>%
+  filter_trace(c(1:10)) %>% 
+    precedence_matrix(type = "relative-consequent") %>%
+    plot
+
+```
+
